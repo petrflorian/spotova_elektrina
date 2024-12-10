@@ -1,6 +1,8 @@
+# sensor.py
 """Sensor platform for Spotová Elektřina."""
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta  # přidaný import timedelta
+import asyncio
 import aiohttp
 import async_timeout
 
@@ -17,6 +19,7 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
+    UpdateFailed,  # přidaný import UpdateFailed
 )
 
 from .const import (
