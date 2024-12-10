@@ -86,7 +86,7 @@ class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
 class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
     """Implementation of the main Spotová Elektřina sensor."""
 
-    _attr_native_unit_of_measurement = "CZK/kWh"
+    _attr_native_unit_of_measurement = "Kč/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -144,7 +144,7 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
 class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
     """Implementation of the hourly Spotová Elektřina sensor."""
 
-    _attr_native_unit_of_measurement = "CZK/kWh"
+    _attr_native_unit_of_measurement = "Kč/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
 
