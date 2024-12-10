@@ -86,7 +86,7 @@ class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
 class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
     """Implementation of the main Spotová Elektřina sensor."""
 
-    _attr_native_unit_of_measurement = "CZK/MWh"
+    _attr_native_unit_of_measurement = "CZK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -95,6 +95,12 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._attr_unique_id = f"{DOMAIN}_current_price"
         self._attr_name = DEFAULT_NAME
+
+    def convert_to_kwh(self, price_mwh: float | None) -> float | None:
+        """Convert price from MWh to kWh."""
+        if price_mwh is None:
+            return None
+        return round(price_mwh / 1000, 2)
 
     @property
     def native_value(self) -> StateType:
@@ -110,7 +116,7 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
             None,
         )
         
-        return current_price
+        return self.convert_to_kwh(current_price)
 
     @property
     def extra_state_attributes(self):
@@ -126,11 +132,11 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
 
         return {
             "forecast_today": {
-                f"{price['hour']:02d}:00": price["priceCZK"]
+                f"{price['hour']:02d}:00": self.convert_to_kwh(price["priceCZK"])
                 for price in today_prices
             },
             "forecast_tomorrow": {
-                f"{price['hour']:02d}:00": price["priceCZK"]
+                f"{price['hour']:02d}:00": self.convert_to_kwh(price["priceCZK"])
                 for price in tomorrow_prices
             }
         }
@@ -138,7 +144,7 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
 class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
     """Implementation of the hourly Spotová Elektřina sensor."""
 
-    _attr_native_unit_of_measurement = "CZK/MWh"
+    _attr_native_unit_of_measurement = "CZK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -149,6 +155,12 @@ class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_price_{hour_offset}h"
         self._attr_name = f"{DEFAULT_NAME} {suffix}"
 
+    def convert_to_kwh(self, price_mwh: float | None) -> float | None:
+        """Convert price from MWh to kWh."""
+        if price_mwh is None:
+            return None
+        return round(price_mwh / 1000, 2)
+
     def get_price_for_hour(self, target_hour: int, target_is_tomorrow: bool, data: dict) -> float | None:
         """Get price for specific hour."""
         if target_is_tomorrow:
@@ -156,10 +168,11 @@ class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
         else:
             prices = data.get("hoursToday", [])
         
-        return next(
+        price_mwh = next(
             (price["priceCZK"] for price in prices if price["hour"] == target_hour),
             None
         )
+        return self.convert_to_kwh(price_mwh)
 
     @property
     def native_value(self) -> StateType:
