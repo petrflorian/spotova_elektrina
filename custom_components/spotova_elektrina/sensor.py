@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import dt
 
 from .const import (
     DOMAIN,
@@ -58,17 +59,27 @@ class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=30),
+            update_interval=timedelta(minutes=5),  # Častější kontrola
         )
         self.session = async_get_clientsession(hass)
+        self._last_update_hour = None
 
     async def _async_update_data(self):
         """Update data via library."""
         try:
-            async with async_timeout.timeout(10):
-                async with self.session.get(API_ENDPOINT) as response:
-                    data = await response.json()
-                    return data
+            current_hour = dt.now().hour
+            
+            # Vynutit aktualizaci při změně hodiny
+            force_update = self._last_update_hour != current_hour
+            self._last_update_hour = current_hour
+
+            if force_update or not self.data:
+                async with async_timeout.timeout(10):
+                    async with self.session.get(API_ENDPOINT) as response:
+                        data = await response.json()
+                        return data
+            return self.data
+
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
 
@@ -91,7 +102,7 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
         if not self.coordinator.data:
             return None
 
-        current_hour = datetime.now().hour
+        current_hour = dt.now().hour
         today_prices = self.coordinator.data.get("hoursToday", [])
         
         current_price = next(
@@ -138,25 +149,17 @@ class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_price_{hour_offset}h"
         self._attr_name = f"{DEFAULT_NAME} {suffix}"
 
-    def get_price_for_hour(self, target_hour: int, data: dict) -> float | None:
+    def get_price_for_hour(self, target_hour: int, target_is_tomorrow: bool, data: dict) -> float | None:
         """Get price for specific hour."""
-        today_prices = data.get("hoursToday", [])
-        tomorrow_prices = data.get("hoursTomorrow", [])
+        if target_is_tomorrow:
+            prices = data.get("hoursTomorrow", [])
+        else:
+            prices = data.get("hoursToday", [])
         
-        # Nejdřív zkusíme najít v dnešních cenách
-        price = next(
-            (price["priceCZK"] for price in today_prices if price["hour"] == target_hour),
+        return next(
+            (price["priceCZK"] for price in prices if price["hour"] == target_hour),
             None
         )
-        
-        # Pokud není v dnešních, možná je v zítřejších
-        if price is None:
-            price = next(
-                (price["priceCZK"] for price in tomorrow_prices if price["hour"] == target_hour),
-                None
-            )
-        
-        return price
 
     @property
     def native_value(self) -> StateType:
@@ -164,17 +167,20 @@ class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
         if not self.coordinator.data:
             return None
 
-        current_hour = datetime.now().hour
-        target_hour = (current_hour + self.hour_offset) % 24
+        now = dt.now()
+        target_time = now + timedelta(hours=self.hour_offset)
+        target_hour = target_time.hour
+        target_is_tomorrow = target_time.date() > now.date()
         
-        return self.get_price_for_hour(target_hour, self.coordinator.data)
+        return self.get_price_for_hour(target_hour, target_is_tomorrow, self.coordinator.data)
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        current_hour = datetime.now().hour
-        target_hour = (current_hour + self.hour_offset) % 24
+        now = dt.now()
+        target_time = now + timedelta(hours=self.hour_offset)
         
         return {
-            "hour": f"{target_hour:02d}:00"
+            "hour": target_time.strftime("%H:00"),
+            "date": target_time.strftime("%Y-%m-%d")
         }
