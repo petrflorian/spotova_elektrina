@@ -1,8 +1,8 @@
 {
     "name": "Spotová Elektřina",
-    "content_in_root": false,
     "render_readme": true,
-    "domains": ["sensor"],
-    "country": ["CZ"],
+    "domain": "spotova_elektrina",
+    "documentation": "https://github.com/petrflorian/spotova_elektrina",
+    "issue_tracker": "https://github.com/petrflorian/spotova_elektrina/issues",
     "homeassistant": "2023.8.0"
 }
