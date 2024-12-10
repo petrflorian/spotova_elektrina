@@ -31,7 +31,7 @@ Integrace pro sledování spotových cen elektřiny z webu spotovaelektrina.cz
 
 Zobrazení aktualní ceny a cen na příštích 6 hodin
 
-```yaml
+
 sensor.spotova_elektrina_aktualni
 sensor.spotova_elektrina_1h
 sensor.spotova_elektrina_2h
@@ -39,7 +39,7 @@ sensor.spotova_elektrina_3h
 sensor.spotova_elektrina_4h
 sensor.spotova_elektrina_5h
 sensor.spotova_elektrina_6h
-```
+
 
 
 Pro zobrazení tabulky s cenami můžete použít následující kartu v Lovelace:
