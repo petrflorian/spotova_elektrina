@@ -1,8 +1,6 @@
 {
     "name": "Spotová Elektřina",
-    "render_readme": true,
-    "domain": "spotova_elektrina",
-    "documentation": "https://github.com/petrflorian/spotova_elektrina",
-    "issue_tracker": "https://github.com/petrflorian/spotova_elektrina/issues",
-    "homeassistant": "2023.8.0"
+    "hacs": "1.6.0",
+    "domains": ["sensor"],
+    "render_readme": true
 }
