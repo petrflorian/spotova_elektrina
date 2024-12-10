@@ -1,0 +1,11 @@
+{
+    "domain": "spotova_elektrina",
+    "name": "Spotová Elektřina",
+    "config_flow": true,
+    "documentation": "https://github.com/petrflorian/spotova_elektrina",
+    "issue_tracker": "https://github.com/petrflorian/spotova_elektrina/issues",
+    "requirements": ["aiohttp"],
+    "codeowners": ["@petrflorian"],
+    "iot_class": "cloud_polling",
+    "version": "1.0.0"
+}

@@ -1,0 +1,13 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Spotová Elektřina",
+                "description": "Chcete nastavit Spotovou Elektřinu?"
+            }
+        },
+        "abort": {
+            "single_instance_allowed": "Již nakonfigurováno. Možná je pouze jedna konfigurace."
+        }
+    }
+}

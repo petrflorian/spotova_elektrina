@@ -1,0 +1,8 @@
+{
+    "name": "Spotová Elektřina",
+    "content_in_root": false,
+    "render_readme": true,
+    "domains": ["sensor"],
+    "country": ["CZ"],
+    "homeassistant": "2023.8.0"
+}
