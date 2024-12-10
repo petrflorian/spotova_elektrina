@@ -1,3 +1,4 @@
+# sensor.py
 """Sensor platform for Spotová Elektřina."""
 import logging
 from datetime import datetime, timedelta
@@ -39,12 +40,12 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
     
     sensors = []
-    # Senzor pro aktuální hodinu
-    sensors.append(SpotovaElektrinaSensor(coordinator, 0, "Aktuální"))
+    # Hlavní senzor se všemi daty
+    sensors.append(SpotovaElektrinaMainSensor(coordinator))
     
-    # Senzory pro následující hodiny
+    # Dodatečné senzory pro jednotlivé hodiny
     for i in range(1, 7):
-        sensors.append(SpotovaElektrinaSensor(coordinator, i, f"+{i}h"))
+        sensors.append(SpotovaElektrinaHourSensor(coordinator, i, f"+{i}h"))
     
     async_add_entities(sensors, True)
 
@@ -71,8 +72,60 @@ class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
 
-class SpotovaElektrinaSensor(CoordinatorEntity, SensorEntity):
-    """Implementation of the Spotová Elektřina sensor."""
+class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
+    """Implementation of the main Spotová Elektřina sensor."""
+
+    _attr_native_unit_of_measurement = "CZK/MWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: SpotovaElektrinaCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{DOMAIN}_current_price"
+        self._attr_name = DEFAULT_NAME
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state of the sensor."""
+        if not self.coordinator.data:
+            return None
+
+        current_hour = datetime.now().hour
+        today_prices = self.coordinator.data.get("hoursToday", [])
+        
+        current_price = next(
+            (price["priceCZK"] for price in today_prices if price["hour"] == current_hour),
+            None,
+        )
+        
+        return current_price
+
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {
+                "forecast_today": {},
+                "forecast_tomorrow": {}
+            }
+
+        today_prices = self.coordinator.data.get("hoursToday", [])
+        tomorrow_prices = self.coordinator.data.get("hoursTomorrow", [])
+
+        return {
+            "forecast_today": {
+                f"{price['hour']:02d}:00": price["priceCZK"]
+                for price in today_prices
+            },
+            "forecast_tomorrow": {
+                f"{price['hour']:02d}:00": price["priceCZK"]
+                for price in tomorrow_prices
+            }
+        }
+
+class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
+    """Implementation of the hourly Spotová Elektřina sensor."""
 
     _attr_native_unit_of_measurement = "CZK/MWh"
     _attr_device_class = SensorDeviceClass.MONETARY
