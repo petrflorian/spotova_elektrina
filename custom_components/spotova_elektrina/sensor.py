@@ -1,7 +1,6 @@
-# sensor.py
 """Sensor platform for Spotová Elektřina."""
 import logging
-from datetime import datetime, timedelta  # přidaný import timedelta
+from datetime import datetime, timedelta
 import asyncio
 import aiohttp
 import async_timeout
@@ -19,7 +18,7 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
-    UpdateFailed,  # přidaný import UpdateFailed
+    UpdateFailed,
 )
 
 from .const import (
@@ -39,7 +38,15 @@ async def async_setup_entry(
     coordinator = SpotovaElektrinaCoordinator(hass)
     await coordinator.async_config_entry_first_refresh()
     
-    async_add_entities([SpotovaElektrinaSensor(coordinator)], True)
+    sensors = []
+    # Senzor pro aktuální hodinu
+    sensors.append(SpotovaElektrinaSensor(coordinator, 0, "Aktuální"))
+    
+    # Senzory pro následující hodiny
+    for i in range(1, 7):
+        sensors.append(SpotovaElektrinaSensor(coordinator, i, f"+{i}h"))
+    
+    async_add_entities(sensors, True)
 
 class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
@@ -71,11 +78,32 @@ class SpotovaElektrinaSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: SpotovaElektrinaCoordinator) -> None:
+    def __init__(self, coordinator: SpotovaElektrinaCoordinator, hour_offset: int, suffix: str) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_current_price"
-        self._attr_name = DEFAULT_NAME
+        self.hour_offset = hour_offset
+        self._attr_unique_id = f"{DOMAIN}_price_{hour_offset}h"
+        self._attr_name = f"{DEFAULT_NAME} {suffix}"
+
+    def get_price_for_hour(self, target_hour: int, data: dict) -> float | None:
+        """Get price for specific hour."""
+        today_prices = data.get("hoursToday", [])
+        tomorrow_prices = data.get("hoursTomorrow", [])
+        
+        # Nejdřív zkusíme najít v dnešních cenách
+        price = next(
+            (price["priceCZK"] for price in today_prices if price["hour"] == target_hour),
+            None
+        )
+        
+        # Pokud není v dnešních, možná je v zítřejších
+        if price is None:
+            price = next(
+                (price["priceCZK"] for price in tomorrow_prices if price["hour"] == target_hour),
+                None
+            )
+        
+        return price
 
     @property
     def native_value(self) -> StateType:
@@ -84,34 +112,16 @@ class SpotovaElektrinaSensor(CoordinatorEntity, SensorEntity):
             return None
 
         current_hour = datetime.now().hour
-        today_prices = self.coordinator.data.get("hoursToday", [])
+        target_hour = (current_hour + self.hour_offset) % 24
         
-        current_price = next(
-            (price["priceCZK"] for price in today_prices if price["hour"] == current_hour),
-            None,
-        )
-        
-        return current_price
+        return self.get_price_for_hour(target_hour, self.coordinator.data)
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        if not self.coordinator.data:
-            return {
-                "forecast_today": {},
-                "forecast_tomorrow": {}
-            }
-
-        today_prices = self.coordinator.data.get("hoursToday", [])
-        tomorrow_prices = self.coordinator.data.get("hoursTomorrow", [])
-
+        current_hour = datetime.now().hour
+        target_hour = (current_hour + self.hour_offset) % 24
+        
         return {
-            "forecast_today": {
-                f"{price['hour']:02d}:00": price["priceCZK"]
-                for price in today_prices
-            },
-            "forecast_tomorrow": {
-                f"{price['hour']:02d}:00": price["priceCZK"]
-                for price in tomorrow_prices
-            }
+            "hour": f"{target_hour:02d}:00"
         }
