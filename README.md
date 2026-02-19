@@ -74,6 +74,10 @@ Po instalaci vzniknou entity:
 
 Všechny senzory mají jednotku `Kč/kWh`.
 
+Poznámka: offset senzory (`+15m` až `+90m`, `+1h` až `+6h`) jsou
+**ve výchozím stavu vypnuté**. Standardně tedy uvidíš jen hlavní senzor
+`sensor.spotova_elektrina`. Pokud je chceš, zapneš je v registru entit.
+
 ## Atributy hlavního senzoru
 
 `sensor.spotova_elektrina` vrací tyto důležité atributy:
