@@ -39,8 +39,28 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     sensors = [SpotovaElektrinaMainSensor(coordinator)]
+
+    # Backward-compatible hourly offsets.
     for i in range(1, 7):
-        sensors.append(SpotovaElektrinaHourSensor(coordinator, i, f"+{i}h"))
+        sensors.append(
+            SpotovaElektrinaOffsetSensor(
+                coordinator=coordinator,
+                offset=timedelta(hours=i),
+                unique_id_suffix=f"{i}h",
+                name_suffix=f"+{i}h",
+            )
+        )
+
+    # Quarter-hour offsets for granular visualization.
+    for minutes in (15, 30, 45, 60, 75, 90):
+        sensors.append(
+            SpotovaElektrinaOffsetSensor(
+                coordinator=coordinator,
+                offset=timedelta(minutes=minutes),
+                unique_id_suffix=f"{minutes}m",
+                name_suffix=f"+{minutes}m",
+            )
+        )
 
     async_add_entities(sensors, True)
 
@@ -218,20 +238,21 @@ class SpotovaElektrinaMainSensor(SpotovaElektrinaBaseSensor):
         }
 
 
-class SpotovaElektrinaHourSensor(SpotovaElektrinaBaseSensor):
+class SpotovaElektrinaOffsetSensor(SpotovaElektrinaBaseSensor):
     """Implementation of offset Spotová Elektřina sensor."""
 
     def __init__(
         self,
         coordinator: SpotovaElektrinaCoordinator,
-        hour_offset: int,
-        suffix: str,
+        offset: timedelta,
+        unique_id_suffix: str,
+        name_suffix: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.hour_offset = hour_offset
-        self._attr_unique_id = f"{DOMAIN}_price_{hour_offset}h"
-        self._attr_name = f"{DEFAULT_NAME} {suffix}"
+        self._offset = offset
+        self._attr_unique_id = f"{DOMAIN}_price_{unique_id_suffix}"
+        self._attr_name = f"{DEFAULT_NAME} {name_suffix}"
 
     @property
     def native_value(self) -> StateType:
@@ -239,14 +260,13 @@ class SpotovaElektrinaHourSensor(SpotovaElektrinaBaseSensor):
         if not self.coordinator.data:
             return None
 
-        now = dt.now()
-        target_time = now + timedelta(hours=self.hour_offset)
+        target_time = dt.now() + self._offset
         return self._get_price_for_datetime(target_time, self.coordinator.data)
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        target_time = dt.now() + timedelta(hours=self.hour_offset)
+        target_time = dt.now() + self._offset
         target_minute = (target_time.minute // 15) * 15
 
         day_prices, is_qh = self._get_day_prices_for_datetime(

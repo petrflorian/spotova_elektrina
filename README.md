@@ -6,7 +6,8 @@ Vlastní integrace Home Assistantu pro načítání spotových cen elektřiny ze
 
 - načítá aktuální spotovou cenu elektřiny
 - používá primárně **čtvrthodinová data (15 min)**
-- vystavuje hlavní senzor + senzory pro cenu za `+1h` až `+6h`
+- vystavuje hlavní senzor + hodinové senzory `+1h` až `+6h`
+- přidává čtvrthodinové senzory `+15m` až `+90m` pro jemnější zobrazení
 - poskytuje přehled dnešních a zítřejších cen v atributech senzoru
 
 ## Důležitá změna od 1. 10. 2025
@@ -58,6 +59,12 @@ Integrace je single-instance (pouze jedna konfigurace).
 Po instalaci vzniknou entity:
 
 - `sensor.spotova_elektrina` (aktuální cena)
+- `sensor.spotova_elektrina_15m`
+- `sensor.spotova_elektrina_30m`
+- `sensor.spotova_elektrina_45m`
+- `sensor.spotova_elektrina_60m`
+- `sensor.spotova_elektrina_75m`
+- `sensor.spotova_elektrina_90m`
 - `sensor.spotova_elektrina_1h`
 - `sensor.spotova_elektrina_2h`
 - `sensor.spotova_elektrina_3h`
@@ -77,7 +84,7 @@ Všechny senzory mají jednotku `Kč/kWh`.
 
 Při 15min datech má každý den obvykle 96 hodnot.
 
-## Atributy offset senzorů (+1h až +6h)
+## Atributy offset senzorů (+15m až +90m, +1h až +6h)
 
 Každý offset senzor obsahuje:
 
@@ -102,6 +109,9 @@ type: entities
 title: Spotová elektřina
 entities:
   - entity: sensor.spotova_elektrina
+  - entity: sensor.spotova_elektrina_15m
+  - entity: sensor.spotova_elektrina_30m
+  - entity: sensor.spotova_elektrina_45m
   - entity: sensor.spotova_elektrina_1h
   - entity: sensor.spotova_elektrina_2h
   - entity: sensor.spotova_elektrina_3h
