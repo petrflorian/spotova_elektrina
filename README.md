@@ -1,42 +1,154 @@
 # Spotová Elektřina pro Home Assistant
 
-Integrace pro sledování spotových cen elektřiny z webu spotovaelektrina.cz
+Vlastní integrace Home Assistantu pro načítání spotových cen elektřiny ze služby [spotovaelektrina.cz](https://spotovaelektrina.cz).
+
+## Co integrace dělá
+
+- načítá aktuální spotovou cenu elektřiny
+- používá primárně **čtvrthodinová data (15 min)**
+- vystavuje hlavní senzor + senzory pro cenu za `+1h` až `+6h`
+- poskytuje přehled dnešních a zítřejších cen v atributech senzoru
+
+## Důležitá změna od 1. 10. 2025
+
+Od **1. října 2025** jsou spotové ceny na trhu čtvrthodinové.
+Integrace proto používá endpoint:
+
+- `https://spotovaelektrina.cz/api/v1/price/get-prices-json-qh`
+
+Pokud je nový endpoint dočasně nedostupný, integrace má fallback na hodinové API:
+
+- `https://spotovaelektrina.cz/api/v1/price/get-prices-json`
+
+V takovém případě se v atributech projeví rozlišení `60` minut.
+
+## Požadavky
+
+- Home Assistant s podporou custom integrací
+- HACS (doporučeno) nebo manuální kopie do `custom_components`
+- přístup Home Assistantu na internet (volání API)
 
 ## Instalace
 
-### HACS (doporučeno)
+### Varianta A: HACS (doporučeno)
 
-1. Přidejte tento repozitář do HACS jako Custom Repository:
-   - Otevřete HACS
-   - Klikněte na tři tečky vpravo nahoře
-   - Vyberte "Custom repositories"
-   - Přidejte URL: `https://github.com/petrflorian/spotova_elektrina`
-   - Kategorie: Integration
-2. Klikněte na "Spotová Elektřina" a poté na "DOWNLOAD"
-3. Restartujte Home Assistant
+1. Otevři HACS.
+2. `⋮` -> `Custom repositories`.
+3. Přidej repozitář `https://github.com/petrflorian/spotova_elektrina`.
+4. Typ: `Integration`.
+5. Nainstaluj integraci `Spotová Elektřina`.
+6. Restartuj Home Assistant.
 
-### Manuální instalace
+### Varianta B: Manuálně
 
-1. Stáhněte si obsah tohoto repozitáře
-2. Zkopírujte složku `custom_components/spotova_elektrina` do vaší instalace Home Assistant
-3. Restartujte Home Assistant
+1. Zkopíruj složku `custom_components/spotova_elektrina` do Home Assistant konfigurace.
+2. Restartuj Home Assistant.
 
-## Nastavení
+## Konfigurace v Home Assistantu
 
-1. Přejděte do Nastavení -> Zařízení a služby
-2. Klikněte na tlačítko "+ PŘIDAT INTEGRACI"
-3. Vyhledejte "Spotová Elektřina"
+1. `Nastavení` -> `Zařízení a služby`.
+2. Klikni na `+ Přidat integraci`.
+3. Vyhledej `Spotová Elektřina`.
+4. Dokonči přidání.
 
-## Zobrazení dat
+Integrace je single-instance (pouze jedna konfigurace).
 
-Zobrazení aktualní ceny a cen na příštích 6 hodin
+## Entity
+
+Po instalaci vzniknou entity:
+
+- `sensor.spotova_elektrina` (aktuální cena)
+- `sensor.spotova_elektrina_1h`
+- `sensor.spotova_elektrina_2h`
+- `sensor.spotova_elektrina_3h`
+- `sensor.spotova_elektrina_4h`
+- `sensor.spotova_elektrina_5h`
+- `sensor.spotova_elektrina_6h`
+
+Všechny senzory mají jednotku `Kč/kWh`.
+
+## Atributy hlavního senzoru
+
+`sensor.spotova_elektrina` vrací tyto důležité atributy:
+
+- `resolution_minutes`: `15` nebo `60` (při fallbacku)
+- `forecast_today`: mapování času na cenu (`HH:MM` -> `Kč/kWh`)
+- `forecast_tomorrow`: mapování času na cenu (`HH:MM` -> `Kč/kWh`)
+
+Při 15min datech má každý den obvykle 96 hodnot.
+
+## Atributy offset senzorů (+1h až +6h)
+
+Každý offset senzor obsahuje:
+
+- `hour`: cílová hodina (`HH:00`)
+- `slot`: cílový slot (`HH:MM`)
+- `date`: cílové datum
+- `resolution_minutes`: `15` nebo `60`
+- `data_points_for_day`: počet dostupných slotů v daném dni
+
+## Jak interpretovat data
+
+- API vrací ceny v `Kč/MWh`.
+- Integrace je převádí na `Kč/kWh` (`/1000`) a zaokrouhluje na 2 desetinná místa.
+- U 15min dat se pro aktuální hodnotu používá právě běžící čtvrthodinový slot.
+
+## Příklady použití
+
+### Jednoduché zobrazení v kartě Entities
 
 ```yaml
-sensor.spotova_elektrina
-sensor.spotova_elektrina_1h
-sensor.spotova_elektrina_2h
-sensor.spotova_elektrina_3h
-sensor.spotova_elektrina_4h
-sensor.spotova_elektrina_5h
-sensor.spotova_elektrina_6h
+type: entities
+title: Spotová elektřina
+entities:
+  - entity: sensor.spotova_elektrina
+  - entity: sensor.spotova_elektrina_1h
+  - entity: sensor.spotova_elektrina_2h
+  - entity: sensor.spotova_elektrina_3h
 ```
+
+### Template senzor: minimum z dnešního forecastu
+
+```yaml
+template:
+  - sensor:
+      - name: "Spot - dnešní minimum"
+        unit_of_measurement: "Kč/kWh"
+        state: >-
+          {% set values = state_attr('sensor.spotova_elektrina', 'forecast_today') %}
+          {% if values %}
+            {{ values.values() | min }}
+          {% else %}
+            unknown
+          {% endif %}
+```
+
+## Omezení
+
+- Integrace neobsahuje distribuční složku ceny, DPH ani poplatky obchodníka.
+- Hodnoty reprezentují spotovou cenu silové elektřiny z API poskytovatele.
+- Kvalita a dostupnost dat je závislá na dostupnosti externího API.
+
+## Řešení problémů
+
+1. Ověř, že Home Assistant má internetové připojení.
+2. Zkontroluj stav API endpointu v prohlížeči.
+3. Restartuj Home Assistant po aktualizaci integrace.
+4. Zkontroluj logy Home Assistantu (`Nastavení` -> `Systém` -> `Protokoly`).
+
+Pro detailnější debug můžeš přidat do `configuration.yaml`:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.spotova_elektrina: debug
+```
+
+## Vývoj a validace
+
+Repozitář obsahuje workflow pro validaci přes Hassfest a HACS action.
+
+## Licence
+
+Projekt je licencován pod MIT licencí. Viz soubor `LICENSE`.

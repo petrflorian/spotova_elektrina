@@ -1,19 +1,20 @@
 # sensor.py
 """Sensor platform for Spotová Elektřina."""
+import asyncio
 import logging
 from datetime import datetime, timedelta
-import asyncio
+
 import aiohttp
-import async_timeout
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
-    SensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import (
@@ -23,13 +24,10 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt
 
-from .const import (
-    DOMAIN,
-    DEFAULT_NAME,
-    API_ENDPOINT,
-)
+from .const import API_ENDPOINT_HOURLY, API_ENDPOINT_QH, DEFAULT_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -39,16 +37,13 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     coordinator = SpotovaElektrinaCoordinator(hass)
     await coordinator.async_config_entry_first_refresh()
-    
-    sensors = []
-    # Hlavní senzor se všemi daty
-    sensors.append(SpotovaElektrinaMainSensor(coordinator))
-    
-    # Dodatečné senzory pro jednotlivé hodiny
+
+    sensors = [SpotovaElektrinaMainSensor(coordinator)]
     for i in range(1, 7):
         sensors.append(SpotovaElektrinaHourSensor(coordinator, i, f"+{i}h"))
-    
+
     async_add_entities(sensors, True)
+
 
 class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
@@ -59,36 +54,135 @@ class SpotovaElektrinaCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=5),  # Častější kontrola
+            update_interval=timedelta(minutes=1),
         )
         self.session = async_get_clientsession(hass)
-        self._last_update_hour = None
+        self._last_update_slot: tuple[int, int] | None = None
 
-    async def _async_update_data(self):
-        """Update data via library."""
+    def _current_slot(self) -> tuple[int, int]:
+        """Return current quarter-hour slot as (hour, minute)."""
+        now = dt.now()
+        return now.hour, (now.minute // 15) * 15
+
+    async def _fetch_json(self, url: str) -> dict:
+        """Fetch JSON data from URL."""
+        async with asyncio.timeout(10):
+            async with self.session.get(url) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+        if not isinstance(data, dict):
+            raise UpdateFailed("Unexpected API response format")
+
+        return data
+
+    async def _async_update_data(self) -> dict:
+        """Update data via API."""
         try:
-            current_hour = dt.now().hour
-            
-            # Vynutit aktualizaci při změně hodiny
-            force_update = self._last_update_hour != current_hour
-            self._last_update_hour = current_hour
+            current_slot = self._current_slot()
+            force_update = self._last_update_slot != current_slot
+            self._last_update_slot = current_slot
 
-            if force_update or not self.data:
-                async with async_timeout.timeout(10):
-                    async with self.session.get(API_ENDPOINT) as response:
-                        data = await response.json()
-                        return data
-            return self.data
+            if not force_update and self.data:
+                return self.data
 
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            raise UpdateFailed(f"Error communicating with API: {err}")
+            try:
+                return await self._fetch_json(API_ENDPOINT_QH)
+            except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as err:
+                _LOGGER.warning(
+                    "Quarter-hour endpoint failed (%s), trying hourly fallback",
+                    err,
+                )
+                return await self._fetch_json(API_ENDPOINT_HOURLY)
 
-class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
-    """Implementation of the main Spotová Elektřina sensor."""
+        except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as err:
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
+
+
+class SpotovaElektrinaBaseSensor(CoordinatorEntity, SensorEntity):
+    """Shared logic for Spotová Elektřina sensors."""
 
     _attr_native_unit_of_measurement = "Kč/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, DOMAIN)},
+            name=DEFAULT_NAME,
+            manufacturer="spotovaelektrina.cz",
+        )
+
+    def convert_to_kwh(self, price_mwh: float | None) -> float | None:
+        """Convert price from MWh to kWh."""
+        if price_mwh is None:
+            return None
+        return round(price_mwh / 1000, 2)
+
+    def _is_qh_data(self, prices: list[dict]) -> bool:
+        """Check if prices contain quarter-hour entries."""
+        return bool(prices) and "minute" in prices[0]
+
+    def _get_day_prices_for_datetime(
+        self, target: datetime, data: dict
+    ) -> tuple[list[dict], bool]:
+        """Return relevant day price list and whether it's quarter-hour data."""
+        now_date = dt.now().date()
+        if target.date() == now_date:
+            prices = data.get("hoursToday", [])
+        elif target.date() == now_date + timedelta(days=1):
+            prices = data.get("hoursTomorrow", [])
+        else:
+            prices = []
+
+        return prices, self._is_qh_data(prices)
+
+    def _get_price_for_datetime(self, target: datetime, data: dict) -> float | None:
+        """Get price for target datetime."""
+        prices, is_qh = self._get_day_prices_for_datetime(target, data)
+        if not prices:
+            return None
+
+        if is_qh:
+            target_minute = (target.minute // 15) * 15
+            price_mwh = next(
+                (
+                    item.get("priceCZK")
+                    for item in prices
+                    if item.get("hour") == target.hour
+                    and item.get("minute", 0) == target_minute
+                ),
+                None,
+            )
+        else:
+            price_mwh = next(
+                (item.get("priceCZK") for item in prices if item.get("hour") == target.hour),
+                None,
+            )
+
+        return self.convert_to_kwh(price_mwh)
+
+    def _build_forecast_attributes(self, prices: list[dict]) -> dict[str, float | None]:
+        """Build forecast attributes with HH:MM keys."""
+        if self._is_qh_data(prices):
+            return {
+                f"{item.get('hour', 0):02d}:{item.get('minute', 0):02d}": self.convert_to_kwh(
+                    item.get("priceCZK")
+                )
+                for item in prices
+            }
+
+        return {
+            f"{item.get('hour', 0):02d}:00": self.convert_to_kwh(item.get("priceCZK"))
+            for item in prices
+        }
+
+
+class SpotovaElektrinaMainSensor(SpotovaElektrinaBaseSensor):
+    """Implementation of the main Spotová Elektřina sensor."""
 
     def __init__(self, coordinator: SpotovaElektrinaCoordinator) -> None:
         """Initialize the sensor."""
@@ -96,83 +190,48 @@ class SpotovaElektrinaMainSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_current_price"
         self._attr_name = DEFAULT_NAME
 
-    def convert_to_kwh(self, price_mwh: float | None) -> float | None:
-        """Convert price from MWh to kWh."""
-        if price_mwh is None:
-            return None
-        return round(price_mwh / 1000, 2)
-
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
         if not self.coordinator.data:
             return None
 
-        current_hour = dt.now().hour
-        today_prices = self.coordinator.data.get("hoursToday", [])
-        
-        current_price = next(
-            (price["priceCZK"] for price in today_prices if price["hour"] == current_hour),
-            None,
-        )
-        
-        return self.convert_to_kwh(current_price)
+        return self._get_price_for_datetime(dt.now(), self.coordinator.data)
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {
+                "resolution_minutes": None,
                 "forecast_today": {},
-                "forecast_tomorrow": {}
+                "forecast_tomorrow": {},
             }
 
         today_prices = self.coordinator.data.get("hoursToday", [])
         tomorrow_prices = self.coordinator.data.get("hoursTomorrow", [])
 
         return {
-            "forecast_today": {
-                f"{price['hour']:02d}:00": self.convert_to_kwh(price["priceCZK"])
-                for price in today_prices
-            },
-            "forecast_tomorrow": {
-                f"{price['hour']:02d}:00": self.convert_to_kwh(price["priceCZK"])
-                for price in tomorrow_prices
-            }
+            "resolution_minutes": 15 if self._is_qh_data(today_prices) else 60,
+            "forecast_today": self._build_forecast_attributes(today_prices),
+            "forecast_tomorrow": self._build_forecast_attributes(tomorrow_prices),
         }
 
-class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
-    """Implementation of the hourly Spotová Elektřina sensor."""
 
-    _attr_native_unit_of_measurement = "Kč/kWh"
-    _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+class SpotovaElektrinaHourSensor(SpotovaElektrinaBaseSensor):
+    """Implementation of offset Spotová Elektřina sensor."""
 
-    def __init__(self, coordinator: SpotovaElektrinaCoordinator, hour_offset: int, suffix: str) -> None:
+    def __init__(
+        self,
+        coordinator: SpotovaElektrinaCoordinator,
+        hour_offset: int,
+        suffix: str,
+    ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.hour_offset = hour_offset
         self._attr_unique_id = f"{DOMAIN}_price_{hour_offset}h"
         self._attr_name = f"{DEFAULT_NAME} {suffix}"
-
-    def convert_to_kwh(self, price_mwh: float | None) -> float | None:
-        """Convert price from MWh to kWh."""
-        if price_mwh is None:
-            return None
-        return round(price_mwh / 1000, 2)
-
-    def get_price_for_hour(self, target_hour: int, target_is_tomorrow: bool, data: dict) -> float | None:
-        """Get price for specific hour."""
-        if target_is_tomorrow:
-            prices = data.get("hoursTomorrow", [])
-        else:
-            prices = data.get("hoursToday", [])
-        
-        price_mwh = next(
-            (price["priceCZK"] for price in prices if price["hour"] == target_hour),
-            None
-        )
-        return self.convert_to_kwh(price_mwh)
 
     @property
     def native_value(self) -> StateType:
@@ -182,18 +241,27 @@ class SpotovaElektrinaHourSensor(CoordinatorEntity, SensorEntity):
 
         now = dt.now()
         target_time = now + timedelta(hours=self.hour_offset)
-        target_hour = target_time.hour
-        target_is_tomorrow = target_time.date() > now.date()
-        
-        return self.get_price_for_hour(target_hour, target_is_tomorrow, self.coordinator.data)
+        return self._get_price_for_datetime(target_time, self.coordinator.data)
 
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        now = dt.now()
-        target_time = now + timedelta(hours=self.hour_offset)
-        
+        target_time = dt.now() + timedelta(hours=self.hour_offset)
+        target_minute = (target_time.minute // 15) * 15
+
+        day_prices, is_qh = self._get_day_prices_for_datetime(
+            target_time,
+            self.coordinator.data or {},
+        )
+
         return {
             "hour": target_time.strftime("%H:00"),
-            "date": target_time.strftime("%Y-%m-%d")
+            "slot": (
+                f"{target_time.hour:02d}:{target_minute:02d}"
+                if is_qh
+                else f"{target_time.hour:02d}:00"
+            ),
+            "date": target_time.strftime("%Y-%m-%d"),
+            "resolution_minutes": 15 if is_qh else 60,
+            "data_points_for_day": len(day_prices),
         }
