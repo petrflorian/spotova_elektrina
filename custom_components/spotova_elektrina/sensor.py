@@ -51,8 +51,8 @@ async def async_setup_entry(
             )
         )
 
-    # Quarter-hour offsets for granular visualization.
-    for minutes in (15, 30, 45, 60, 75, 90):
+    # Quarter-hour offsets for granular visualization across the next 6 hours.
+    for minutes in range(15, 361, 15):
         sensors.append(
             SpotovaElektrinaOffsetSensor(
                 coordinator=coordinator,
