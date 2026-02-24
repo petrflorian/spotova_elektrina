@@ -6,8 +6,9 @@ Vlastní integrace Home Assistantu pro načítání spotových cen elektřiny ze
 
 - načítá aktuální spotovou cenu elektřiny
 - používá primárně **čtvrthodinová data (15 min)**
-- vystavuje hlavní senzor + hodinové senzory `+1h` až `+6h`
-- přidává čtvrthodinové senzory `+15m` až `+90m` pro jemnější zobrazení
+- vystavuje hlavní senzor s aktuální cenou
+- zachovává hodinové offset senzory `+1h` až `+6h` (kvůli kompatibilitě)
+- podporuje čtvrthodinové offset senzory pro celé okno 6 hodin (`+15m` až `+360m`)
 - poskytuje přehled dnešních a zítřejších cen v atributech senzoru
 
 ## Důležitá změna od 1. 10. 2025
@@ -58,25 +59,26 @@ Integrace je single-instance (pouze jedna konfigurace).
 
 Po instalaci vzniknou entity:
 
-- `sensor.spotova_elektrina` (aktuální cena)
-- `sensor.spotova_elektrina_15m`
-- `sensor.spotova_elektrina_30m`
-- `sensor.spotova_elektrina_45m`
-- `sensor.spotova_elektrina_60m`
-- `sensor.spotova_elektrina_75m`
-- `sensor.spotova_elektrina_90m`
-- `sensor.spotova_elektrina_1h`
-- `sensor.spotova_elektrina_2h`
-- `sensor.spotova_elektrina_3h`
-- `sensor.spotova_elektrina_4h`
-- `sensor.spotova_elektrina_5h`
-- `sensor.spotova_elektrina_6h`
+- Hlavní senzor:
+  - `sensor.spotova_elektrina` (aktuální cena)
+- Hodinové offsety (kompatibilita):
+  - `sensor.spotova_elektrina_1h` až `sensor.spotova_elektrina_6h`
+- Čtvrthodinové offsety (okno 6 hodin):
+  - `sensor.spotova_elektrina_15m` až `sensor.spotova_elektrina_360m` po 15 minutách
+  - příklady: `sensor.spotova_elektrina_15m`, `sensor.spotova_elektrina_180m`, `sensor.spotova_elektrina_360m`
 
 Všechny senzory mají jednotku `Kč/kWh`.
 
-Poznámka: offset senzory (`+15m` až `+90m`, `+1h` až `+6h`) jsou
-**ve výchozím stavu vypnuté**. Standardně tedy uvidíš jen hlavní senzor
-`sensor.spotova_elektrina`. Pokud je chceš, zapneš je v registru entit.
+Poznámka k výchozímu stavu:
+- offset senzory mohou být podle verze integrace a stavu registru entit skryté / zakázané
+- Home Assistant si u existujících instalací pamatuje dřívější `enabled/disabled` stav
+- pokud je nevidíš, otevři registr entit a zkontroluj `Zakázané entity`
+
+Kde je zapnout ručně v Home Assistantu:
+1. `Nastavení -> Zařízení a služby -> Spotová Elektřina`
+2. Otevři `Entity`
+3. Zobraz `Zakázané entity`
+4. Zapni požadované entity (např. `sensor.spotova_elektrina_15m`, `sensor.spotova_elektrina_180m`)
 
 ## Atributy hlavního senzoru
 
@@ -88,7 +90,7 @@ Poznámka: offset senzory (`+15m` až `+90m`, `+1h` až `+6h`) jsou
 
 Při 15min datech má každý den obvykle 96 hodnot.
 
-## Atributy offset senzorů (+15m až +90m, +1h až +6h)
+## Atributy offset senzorů (+15m až +360m, +1h až +6h)
 
 Každý offset senzor obsahuje:
 
@@ -116,9 +118,25 @@ entities:
   - entity: sensor.spotova_elektrina_15m
   - entity: sensor.spotova_elektrina_30m
   - entity: sensor.spotova_elektrina_45m
+  - entity: sensor.spotova_elektrina_180m
   - entity: sensor.spotova_elektrina_1h
-  - entity: sensor.spotova_elektrina_2h
-  - entity: sensor.spotova_elektrina_3h
+  - entity: sensor.spotova_elektrina_6h
+```
+
+### Příklad automatizace (15min offset)
+
+```yaml
+automation:
+  - alias: "Spot cena za 15 minut je levná"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.spotova_elektrina_15m
+        below: 2.5
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "Spotová elektřina"
+          message: "Cena za 15 minut klesne pod 2.5 Kč/kWh."
 ```
 
 ### Template senzor: minimum z dnešního forecastu
@@ -149,6 +167,11 @@ template:
 2. Zkontroluj stav API endpointu v prohlížeči.
 3. Restartuj Home Assistant po aktualizaci integrace.
 4. Zkontroluj logy Home Assistantu (`Nastavení` -> `Systém` -> `Protokoly`).
+5. Nevidím nové 15min entity:
+   - zkontroluj, že máš aktuální verzi integrace v HACS
+   - restartuj Home Assistant
+   - otevři registr entit a zapni `Zakázané entity`
+   - zkontroluj atribut `resolution_minutes` u `sensor.spotova_elektrina`
 
 Pro detailnější debug můžeš přidat do `configuration.yaml`:
 
