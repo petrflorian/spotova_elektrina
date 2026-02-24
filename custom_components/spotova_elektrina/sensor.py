@@ -240,7 +240,7 @@ class SpotovaElektrinaMainSensor(SpotovaElektrinaBaseSensor):
 
 class SpotovaElektrinaOffsetSensor(SpotovaElektrinaBaseSensor):
     """Implementation of offset Spotová Elektřina sensor."""
-    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self,
